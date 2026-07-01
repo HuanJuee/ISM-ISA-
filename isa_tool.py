@@ -16,9 +16,14 @@ FILE_COUNT_SIZE = 4
 ENTRY_SIZE = 64
 
 # Offsets within file entry
+# NOTE: The filename field actually spans 48 bytes (offset 0-47); the metadata
+# (unknown1 / data_offset / file_size / unknown2) starts at offset 48.
+# Older versions wrongly treated bytes 32-47 as a separate "reserved" region and
+# capped filenames at 31 bytes, which truncated long Japanese names on extract and
+# rejected valid names on pack. The real archive contains names up to 43 bytes.
 FILENAME_OFFSET = 0
-FILENAME_SIZE = 32
-RESERVED1_SIZE = 16
+FILENAME_SIZE = 48
+RESERVED1_SIZE = 0
 UNKNOWN1_OFFSET = FILENAME_SIZE + RESERVED1_SIZE
 UNKNOWN1_SIZE = 4
 DATA_OFFSET_OFFSET = UNKNOWN1_OFFSET + UNKNOWN1_SIZE
@@ -51,10 +56,10 @@ def decode_filename(filename_bytes):
 
 
 def encode_filename(filename):
-    """Encode filename string to Shift-JIS bytes."""
+    """Encode filename string to Shift-JIS bytes (max FILENAME_SIZE bytes)."""
     encoded = filename.encode('shift_jis')
-    if len(encoded) > FILENAME_SIZE - 1:
-        raise ValueError(f"Filename too long (>{FILENAME_SIZE - 1} bytes after encoding): {filename}")
+    if len(encoded) > FILENAME_SIZE:
+        raise ValueError(f"Filename too long (>{FILENAME_SIZE} bytes after encoding): {filename}")
     return encoded
 
 
@@ -320,8 +325,8 @@ def replace_file_in_isa(isa_path, filename_in_isa, new_file_path):
             for entry in new_entries:
                 filename_bytes = encode_filename(entry['filename'])
                 f.write(filename_bytes)
-                f.write(b'\x00' * (32 - len(filename_bytes)))
-                f.write(b'\x00' * 16)  # reserved
+                f.write(b'\x00' * (FILENAME_SIZE - len(filename_bytes)))
+                f.write(b'\x00' * RESERVED1_SIZE)  # reserved
                 f.write(struct.pack('<I', entry['unknown1']))
                 f.write(struct.pack('<I', entry['data_offset']))
                 f.write(struct.pack('<I', entry['file_size']))
